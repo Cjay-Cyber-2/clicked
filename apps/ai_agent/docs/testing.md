@@ -8,7 +8,7 @@ All commands run from `apps/ai_agent`.
 
 ```bash
 # install dev dependencies (pytest, pytest-mock, pytest-cov, httpx)
-uv sync --extra dev
+uv sync --group dev
 
 # run everything
 uv run pytest

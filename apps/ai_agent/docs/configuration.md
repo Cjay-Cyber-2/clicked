@@ -196,7 +196,7 @@ except Exception:
 | Condition                                 | Response                                                                                                                         |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Weaviate down / unreachable               | **503** `{"detail": "Weaviate connection failed"}`                                                                               |
-| Weaviate up, later operation fails        | **503** with the underlying exception text as `detail` — the second `except Exception as e` block re-raises as 503 with `str(e)` |
+| Weaviate up, later operation fails        | **503** `{"detail": "Search backend unavailable"}` — the error is logged with `logging.exception`; its text is never returned. An `HTTPException` (e.g. missing API key → 500) is re-raised unchanged |
 | Weaviate up, `Message` collection missing | `GET /search` → **200** `{"results": []}`; `POST /index/message` creates the collection and proceeds                             |
 | Weaviate up, `OPENAI_API_KEY` missing     | **500** — the embedding call fails after the connection succeeds                                                                 |
 

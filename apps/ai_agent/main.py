@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 from typing import Literal, cast
 
 import uvicorn
 import weaviate
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from weaviate.classes.query import Filter
 
 try:
@@ -17,6 +18,8 @@ except ImportError:  # pragma: no cover - exercised when the dependency is absen
 
 OPENAI_CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Agent API")
 
@@ -30,13 +33,19 @@ _SYSTEM_PROMPT = (
 
 _HIGH_VALUE_THRESHOLD = 10_000.0
 
+# Input limits. Free text is forwarded to paid OpenAI calls, so cap its size.
+MAX_TEXT_LEN = 4_000
+MAX_SHORT_TEXT_LEN = 200
+
+_SEARCH_UNAVAILABLE = "Search backend unavailable"
+
 
 # ── Request / response models ─────────────────────────────────────────────────
 
 
 class ChatRequest(BaseModel):
-    message: str
-    conversation_id: str
+    message: str = Field(min_length=1, max_length=MAX_TEXT_LEN)
+    conversation_id: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
 
 
 class ChatResponse(BaseModel):
@@ -44,10 +53,10 @@ class ChatResponse(BaseModel):
 
 
 class TransferAnalyseRequest(BaseModel):
-    amount: float
-    sender: str
-    recipient: str
-    memo: str
+    amount: float = Field(gt=0)
+    sender: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    recipient: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    memo: str = Field(max_length=MAX_SHORT_TEXT_LEN)
 
 
 class TransferAnalyseResponse(BaseModel):
@@ -57,19 +66,19 @@ class TransferAnalyseResponse(BaseModel):
 
 
 class IndexMessageRequest(BaseModel):
-    messageId: str
-    conversationId: str
-    senderId: str
-    content: str
+    messageId: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    conversationId: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    senderId: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    content: str = Field(min_length=1, max_length=MAX_TEXT_LEN)
 
 
 RiskLevel = Literal["low", "medium", "high"]
 
 
 class ProposalSummariseRequest(BaseModel):
-    title: str
-    description: str
-    amount: float
+    title: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
+    description: str = Field(min_length=1, max_length=MAX_TEXT_LEN)
+    amount: float = Field(gt=0)
 
 
 class ProposalSummariseResponse(BaseModel):
@@ -250,8 +259,11 @@ def index_message(request: IndexMessageRequest):
                 },
                 vector=vector,
             )
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Indexing message failed")
+        raise HTTPException(status_code=503, detail=_SEARCH_UNAVAILABLE)
     finally:
         client.close()
 
@@ -259,7 +271,10 @@ def index_message(request: IndexMessageRequest):
 
 
 @app.get("/search")
-def search_messages(q: str, conversationId: str):
+def search_messages(
+    q: str = Query(min_length=1, max_length=MAX_TEXT_LEN),
+    conversationId: str = Query(min_length=1, max_length=MAX_SHORT_TEXT_LEN),
+):
     try:
         client = weaviate.connect_to_local()
     except Exception:
@@ -294,8 +309,11 @@ def search_messages(q: str, conversationId: str):
             )
 
         return {"results": hits}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Message search failed")
+        raise HTTPException(status_code=503, detail=_SEARCH_UNAVAILABLE)
     finally:
         client.close()
 
