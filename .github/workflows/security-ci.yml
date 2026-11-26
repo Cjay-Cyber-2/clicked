@@ -52,7 +52,7 @@ jobs:
         working-directory: .
 
       - name: Run security regression tests
-        run: pnpm test -- security.regression.test.ts
+        run: pnpm exec vitest run src/__tests__/security.regression.test.ts
         env:
           JWT_SECRET: ci-test-secret
           REDIS_URL: redis://localhost:6379
