@@ -53,7 +53,7 @@ class ChatResponse(BaseModel):
 
 
 class TransferAnalyseRequest(BaseModel):
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, allow_inf_nan=False)
     sender: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
     recipient: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
     memo: str = Field(max_length=MAX_SHORT_TEXT_LEN)
@@ -78,7 +78,7 @@ RiskLevel = Literal["low", "medium", "high"]
 class ProposalSummariseRequest(BaseModel):
     title: str = Field(min_length=1, max_length=MAX_SHORT_TEXT_LEN)
     description: str = Field(min_length=1, max_length=MAX_TEXT_LEN)
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, allow_inf_nan=False)
 
 
 class ProposalSummariseResponse(BaseModel):
@@ -97,6 +97,24 @@ def _openai_client():
         raise HTTPException(status_code=500, detail="openai package is not installed")
 
     return OpenAI(api_key=api_key)
+
+
+def _connect_search_backend() -> weaviate.WeaviateClient:
+    try:
+        return weaviate.connect_to_local()
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Weaviate connection failed")
+        raise HTTPException(status_code=503, detail="Weaviate connection failed")
+
+
+def _close_search_backend(client: weaviate.WeaviateClient) -> None:
+    try:
+        client.close()
+    except Exception:
+        # A cleanup failure must not hide the operation's response or cause a write retry.
+        logger.exception("Closing Weaviate connection failed")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -219,11 +237,7 @@ def summarise_proposal(request: ProposalSummariseRequest):
 
 @app.post("/index/message")
 def index_message(request: IndexMessageRequest):
-    try:
-        # Attempt connection to Weaviate
-        client = weaviate.connect_to_local()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Weaviate connection failed")
+    client = _connect_search_backend()
 
     try:
         if not client.collections.exists("Message"):
@@ -265,7 +279,7 @@ def index_message(request: IndexMessageRequest):
         logger.exception("Indexing message failed")
         raise HTTPException(status_code=503, detail=_SEARCH_UNAVAILABLE)
     finally:
-        client.close()
+        _close_search_backend(client)
 
     return {"status": "ok"}
 
@@ -275,10 +289,7 @@ def search_messages(
     q: str = Query(min_length=1, max_length=MAX_TEXT_LEN),
     conversationId: str = Query(min_length=1, max_length=MAX_SHORT_TEXT_LEN),
 ):
-    try:
-        client = weaviate.connect_to_local()
-    except Exception:
-        raise HTTPException(status_code=503, detail="Weaviate connection failed")
+    client = _connect_search_backend()
 
     try:
         if not client.collections.exists("Message"):
@@ -315,7 +326,7 @@ def search_messages(
         logger.exception("Message search failed")
         raise HTTPException(status_code=503, detail=_SEARCH_UNAVAILABLE)
     finally:
-        client.close()
+        _close_search_backend(client)
 
 
 if __name__ == "__main__":

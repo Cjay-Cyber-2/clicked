@@ -8,8 +8,15 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from main import MAX_SHORT_TEXT_LEN, MAX_TEXT_LEN, app
+from main import (
+    MAX_SHORT_TEXT_LEN,
+    MAX_TEXT_LEN,
+    ProposalSummariseRequest,
+    TransferAnalyseRequest,
+    app,
+)
 
 client = TestClient(app)
 
@@ -62,6 +69,18 @@ def test_invalid_search_query_returns_422_without_calling_openai(q):
     assert response.status_code == 422
     mock_openai.assert_not_called()
     mock_weaviate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("request_model", "body"),
+    [(TransferAnalyseRequest, _TRANSFER), (ProposalSummariseRequest, _PROPOSAL)],
+)
+@pytest.mark.parametrize("amount", [float("inf"), float("nan")])
+def test_request_amount_must_be_finite(request_model, body, amount):
+    with pytest.raises(ValidationError) as exc_info:
+        request_model.model_validate({**body, "amount": amount})
+
+    assert exc_info.value.errors()[0]["type"] == "finite_number"
 
 
 def test_text_at_limit_is_accepted():
