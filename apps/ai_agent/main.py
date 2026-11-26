@@ -130,7 +130,7 @@ def chat(request: ChatRequest):
     client = _openai_client()
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_CHAT_MODEL,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": request.message},
